@@ -3,6 +3,7 @@ package com.example.personalfinancetracker
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -24,16 +25,15 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// Main app composable function
 @Composable
 fun PersonalFinanceTrackerApp() {
-    // A list to store transactions, using mutableStateListOf to observe changes
     var transactions = remember { mutableStateListOf<Transaction>() }
-    var balance by remember { mutableStateOf(0.0) } // Track the balance
-
-    // State to control visibility of the dialog
+    var balance by remember { mutableStateOf(0.0) }
     var showDialog by remember { mutableStateOf(false) }
     var transactionType by remember { mutableStateOf("Income") }
+
+    // Move predefined categories to the main app level to persist across transactions
+    val predefinedCategories = remember { mutableStateListOf("Salary", "Shopping", "Utilities", "Groceries") }
 
     Column(
         modifier = Modifier
@@ -48,12 +48,11 @@ fun PersonalFinanceTrackerApp() {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Buttons for adding income and expense
         Row(modifier = Modifier.align(Alignment.CenterHorizontally)) {
             Button(
                 onClick = {
                     transactionType = "Income"
-                    showDialog = true // Show the custom amount dialog for Income
+                    showDialog = true
                 },
                 modifier = Modifier.padding(end = 8.dp)
             ) {
@@ -63,7 +62,7 @@ fun PersonalFinanceTrackerApp() {
             Button(
                 onClick = {
                     transactionType = "Expense"
-                    showDialog = true // Show the custom amount dialog for Expense
+                    showDialog = true
                 }
             ) {
                 Text("Add Expense")
@@ -72,35 +71,36 @@ fun PersonalFinanceTrackerApp() {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Display list of transactions
         TransactionList(transactions)
 
-        // Show dialog for custom amount
         if (showDialog) {
-            CustomAmountDialog(
+            CustomTransactionDialog(
                 transactionType = transactionType,
-                onAddTransaction = { amount ->
-                    val newTransaction = addTransaction(transactionType, amount)
+                predefinedCategories = predefinedCategories, // Pass categories list
+                onAddTransaction = { amount, category ->
+                    val newTransaction = addTransaction(transactionType, amount, category)
                     transactions.add(newTransaction)
-                    balance += if (transactionType == "Income") amount else -amount // Update balance based on type
-                    showDialog = false // Close dialog
+                    balance += if (transactionType == "Income") amount else -amount
+                    showDialog = false
                 },
-                onDismiss = {
-                    showDialog = false // Close dialog without adding transaction
-                }
+                onDismiss = { showDialog = false }
             )
         }
     }
 }
 
-// Custom dialog to enter a custom amount
+// Updated CustomTransactionDialog to receive predefinedCategories as a parameter
 @Composable
-fun CustomAmountDialog(
+fun CustomTransactionDialog(
     transactionType: String,
-    onAddTransaction: (Double) -> Unit,
+    predefinedCategories: MutableList<String>,
+    onAddTransaction: (Double, String) -> Unit,
     onDismiss: () -> Unit
 ) {
     var amountText by remember { mutableStateOf("") }
+    var selectedCategory by remember { mutableStateOf("") }
+    var expanded by remember { mutableStateOf(false) }
+    var showCustomCategoryDialog by remember { mutableStateOf(false) }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -115,7 +115,6 @@ fun CustomAmountDialog(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Input field for amount
                 OutlinedTextField(
                     value = amountText,
                     onValueChange = { amountText = it },
@@ -125,12 +124,47 @@ fun CustomAmountDialog(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
+                // Box to manage the dropdown field for category
+                Box {
+                    OutlinedTextField(
+                        value = selectedCategory,
+                        onValueChange = { },
+                        label = { Text("Category") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { expanded = true },
+                        readOnly = true
+                    )
+
+                    DropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        predefinedCategories.forEach { category ->
+                            DropdownMenuItem(onClick = {
+                                selectedCategory = category
+                                expanded = false
+                            }) {
+                                Text(text = category)
+                            }
+                        }
+                        DropdownMenuItem(onClick = {
+                            showCustomCategoryDialog = true
+                            expanded = false
+                        }) {
+                            Text(text = "Add New Category")
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
                 Row {
                     Button(
                         onClick = {
                             val amount = amountText.toDoubleOrNull() ?: 0.0
-                            if (amount > 0.0) {
-                                onAddTransaction(amount)
+                            if (amount > 0.0 && selectedCategory.isNotBlank()) {
+                                onAddTransaction(amount, selectedCategory)
                             }
                         },
                         modifier = Modifier.padding(end = 8.dp)
@@ -144,16 +178,74 @@ fun CustomAmountDialog(
             }
         }
     }
+
+    if (showCustomCategoryDialog) {
+        CustomCategoryDialog(
+            onAddCategory = { newCategory ->
+                if (newCategory.isNotBlank()) {
+                    predefinedCategories.add(newCategory)
+                    selectedCategory = newCategory
+                }
+                showCustomCategoryDialog = false
+                expanded = true // Reopen dropdown to show the new category
+            },
+            onDismiss = { showCustomCategoryDialog = false }
+        )
+    }
 }
 
-// Function to create a new transaction with a specified amount
-fun addTransaction(type: String, amount: Double): Transaction {
-    val category = if (type == "Income") "Salary" else "Shopping" // Example categories
+@Composable
+fun CustomCategoryDialog(
+    onAddCategory: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var customCategory by remember { mutableStateOf("") }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = MaterialTheme.shapes.medium,
+            color = MaterialTheme.colors.background
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(text = "Enter New Category", style = MaterialTheme.typography.h6)
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = customCategory,
+                    onValueChange = { customCategory = it },
+                    label = { Text("Category Name") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Row {
+                    Button(
+                        onClick = {
+                            onAddCategory(customCategory)
+                        },
+                        modifier = Modifier.padding(end = 8.dp)
+                    ) {
+                        Text("Add Category")
+                    }
+                    Button(onClick = onDismiss) {
+                        Text("Cancel")
+                    }
+                }
+            }
+        }
+    }
+}
+
+fun addTransaction(type: String, amount: Double, category: String): Transaction {
     val date = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
     return Transaction(type, amount, category, date)
 }
 
-// List to display all transactions using LazyColumn
 @Composable
 fun TransactionList(transactions: List<Transaction>) {
     LazyColumn(modifier = Modifier.fillMaxWidth()) {
@@ -163,7 +255,6 @@ fun TransactionList(transactions: List<Transaction>) {
     }
 }
 
-// Single transaction item in the list
 @Composable
 fun TransactionItem(transaction: Transaction) {
     Card(
